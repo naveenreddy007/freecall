@@ -137,6 +137,7 @@ function App() {
   const audioContextRef = useRef(null)
   const analyserRef = useRef(null)
   const animationFrameRef = useRef(null)
+  const reconnectTimeoutRef = useRef(null)
 
   useEffect(() => {
     const syncPage = () => setPage(getInitialPage())
@@ -151,7 +152,45 @@ function App() {
 
   useEffect(() => {
     const newSocket = io(SERVER_URL, {
-      auth: (cb) => cb({ sessionId: sessionIdRef.current || undefined })
+      auth: (cb) => cb({ sessionId: sessionIdRef.current || undefined }),
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      reconnectionAttempts: Infinity,
+      timeout: 20000
+    })
+
+    newSocket.on('connect', () => {
+      console.log('Socket connected')
+      setError(null)
+      
+      // Clear reconnect timeout if we successfully reconnected
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current)
+        reconnectTimeoutRef.current = null
+      }
+    })
+
+    newSocket.on('connect_error', (err) => {
+      console.error('Connection error:', err)
+      setError('Connection error. Retrying...')
+    })
+
+    newSocket.on('reconnect', (attemptNumber) => {
+      console.log('Reconnected after', attemptNumber, 'attempts')
+      setError(null)
+    })
+
+    newSocket.on('reconnect_attempt', (attemptNumber) => {
+      console.log('Reconnection attempt', attemptNumber)
+    })
+
+    newSocket.on('reconnect_error', (err) => {
+      console.error('Reconnection error:', err)
+    })
+
+    newSocket.on('reconnect_failed', () => {
+      setError('Failed to reconnect. Please refresh the page.')
     })
 
      newSocket.on('session-established', ({ sessionId, userId: sessionUserId }) => {
@@ -221,10 +260,33 @@ function App() {
       setChatMessages(prev => [...prev, { senderId, message, timestamp, isOwn: senderId === userIdRef.current }])
     })
 
-    newSocket.on('disconnect', () => {
-      setError('Disconnected from server')
-      setCallStatus('disconnected')
-      cleanupCall()
+    newSocket.on('disconnect', (reason) => {
+      console.log('Socket disconnected:', reason)
+      
+      // Don't kill the call immediately on disconnect - Socket.IO will auto-reconnect
+      if (reason === 'io server disconnect') {
+        // Server kicked us out - this is fatal
+        setError('Disconnected from server')
+        setCallStatus('disconnected')
+        cleanupCall()
+      } else if (reason === 'transport close' || reason === 'ping timeout') {
+        // Network issue or Render's 5-min drop - Socket.IO will reconnect
+        setError('Connection lost. Reconnecting...')
+        
+        // If we're in a call, give it 10 seconds to reconnect before killing the call
+        if (callStatus === 'connected' || callStatus === 'calling') {
+          reconnectTimeoutRef.current = setTimeout(() => {
+            setError('Failed to reconnect. Call ended.')
+            setCallStatus('disconnected')
+            cleanupCall()
+          }, 10000)
+        }
+      } else {
+        // Other reasons - cleanup
+        setError('Disconnected from server')
+        setCallStatus('disconnected')
+        cleanupCall()
+      }
     })
 
     setSocket(newSocket)
@@ -240,6 +302,9 @@ function App() {
       cleanupCall()
       if (shareTimer.current) {
         clearTimeout(shareTimer.current)
+      }
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current)
       }
     }
   }, [])
