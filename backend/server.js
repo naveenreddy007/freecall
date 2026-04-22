@@ -8,15 +8,41 @@ const fs = require('fs');
 const path = require('path');
 
 const app = express();
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
-app.use(cors({ origin: FRONTEND_URL }));
+
+// Allow multiple frontend origins
+const ALLOWED_ORIGINS = [
+  process.env.FRONTEND_URL,
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'https://freecall4u.vercel.app'
+].filter(Boolean);
+
+app.use(cors({ 
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, Postman, etc.)
+    if (!origin) return callback(null, true);
+    
+    // Check if origin is allowed
+    if (ALLOWED_ORIGINS.some(allowed => origin.startsWith(allowed) || allowed === '*')) {
+      callback(null, true);
+    } else {
+      console.log(`Blocked origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
 
 app.get('/health', (_, res) => res.json({ status: 'ok', sessions: sessionsById.size }));
 
 const server = http.createServer(app);
 
 const io = new Server(server, {
-  cors: { origin: FRONTEND_URL, methods: ['GET', 'POST'] },
+  cors: { 
+    origin: ALLOWED_ORIGINS,
+    methods: ['GET', 'POST'],
+    credentials: true
+  },
   // Keep connections alive through Render's idle timeouts
   pingTimeout: 60000,
   pingInterval: 25000,
@@ -166,5 +192,5 @@ io.on('connection', (socket) => {
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Signaling server running on 0.0.0.0:${PORT}`);
-  console.log(`Allowed frontend: ${FRONTEND_URL}`);
+  console.log(`Allowed origins: ${ALLOWED_ORIGINS.join(', ')}`);
 });
