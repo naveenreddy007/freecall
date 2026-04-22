@@ -113,6 +113,8 @@ function App() {
   const [chatInput, setChatInput] = useState('')
   const [callDuration, setCallDuration] = useState(0)
   const [traceLogs, setTraceLogs] = useState([])
+  const [audioLevel, setAudioLevel] = useState(0)
+  const [isReceivingAudio, setIsReceivingAudio] = useState(false)
   const addTrace = (type, direction, message, source = '') => {
     const log = {
       id: Date.now() + Math.random(),
@@ -132,6 +134,9 @@ function App() {
   const activeCallUserId = useRef(null)
   const remoteAudioRef = useRef(null)
   const userIdRef = useRef('')
+  const audioContextRef = useRef(null)
+  const analyserRef = useRef(null)
+  const animationFrameRef = useRef(null)
 
   useEffect(() => {
     const syncPage = () => setPage(getInitialPage())
@@ -243,6 +248,65 @@ function App() {
   useEffect(() => {
     if (remoteAudioRef.current && remoteStream) {
       remoteAudioRef.current.srcObject = remoteStream
+    }
+  }, [remoteStream])
+
+  // Audio visualizer for remote stream
+  useEffect(() => {
+    if (!remoteStream) {
+      // Cleanup when stream ends
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close()
+        audioContextRef.current = null
+      }
+      setAudioLevel(0)
+      setIsReceivingAudio(false)
+      return
+    }
+
+    try {
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)()
+      const analyser = audioContext.createAnalyser()
+      const source = audioContext.createMediaStreamSource(remoteStream)
+      
+      analyser.fftSize = 256
+      analyser.smoothingTimeConstant = 0.8
+      source.connect(analyser)
+
+      audioContextRef.current = audioContext
+      analyserRef.current = analyser
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount)
+
+      const detectAudio = () => {
+        analyser.getByteFrequencyData(dataArray)
+        
+        // Calculate average volume
+        const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length
+        const normalized = Math.min(100, (average / 128) * 100)
+        
+        setAudioLevel(normalized)
+        setIsReceivingAudio(normalized > 5) // Threshold for detecting audio
+
+        animationFrameRef.current = requestAnimationFrame(detectAudio)
+      }
+
+      detectAudio()
+
+    } catch (err) {
+      console.error('Error setting up audio analyzer:', err)
+    }
+
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close()
+      }
     }
   }, [remoteStream])
 
@@ -730,6 +794,42 @@ function App() {
                   </svg>
                   <span className="text-sm font-medium">{isMuted ? 'Muted' : 'Unmuted'}</span>
                 </div>
+
+                {/* Audio Visualizer */}
+                {callStatus === 'connected' && (
+                  <div className="mt-6 rounded-2xl bg-gradient-to-br from-emerald-50 to-teal-50 p-6">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <div className={`h-2 w-2 rounded-full ${isReceivingAudio ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`}></div>
+                        <span className="text-xs font-medium text-slate-600">
+                          {isReceivingAudio ? 'Receiving audio' : 'Listening...'}
+                        </span>
+                      </div>
+                      <span className="text-xs text-slate-500">{Math.round(audioLevel)}%</span>
+                    </div>
+                    
+                    {/* Waveform bars */}
+                    <div className="flex items-center justify-center gap-1 h-16">
+                      {[...Array(20)].map((_, i) => {
+                        const barHeight = isReceivingAudio 
+                          ? Math.max(20, audioLevel * (0.5 + Math.random() * 0.5))
+                          : 10
+                        return (
+                          <div
+                            key={i}
+                            className={`w-1 bg-gradient-to-t from-emerald-500 to-teal-400 rounded-full transition-all duration-75 ${isReceivingAudio ? 'animate-wave' : ''}`}
+                            style={{
+                              height: `${barHeight}%`,
+                              opacity: isReceivingAudio ? 0.9 : 0.3,
+                              animationDelay: `${i * 30}ms`,
+                              animationDuration: `${600 + Math.random() * 400}ms`
+                            }}
+                          />
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

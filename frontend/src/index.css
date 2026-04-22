@@ -52,3 +52,18 @@ body {
     @apply bg-green-500 animate-pulse;
   }
 }
+
+@keyframes wave {
+  0%, 100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+@layer utilities {
+  .animate-wave {
+    animation: wave 0.8s ease-in-out infinite;
+  }
+}
