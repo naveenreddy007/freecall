@@ -1,0 +1,9 @@
+{
+  "name": "globcall",
+  "private": true,
+  "scripts": {
+    "start": "bash start-all.sh",
+    "dev": "bash start-all.sh",
+    "stop": "bash stop-all.sh"
+  }
+}
