@@ -131,6 +131,7 @@ function App() {
   const sessionIdRef = useRef(readSessionId())
   const activeCallUserId = useRef(null)
   const remoteAudioRef = useRef(null)
+  const userIdRef = useRef('')
 
   useEffect(() => {
     const syncPage = () => setPage(getInitialPage())
@@ -152,12 +153,14 @@ function App() {
        sessionIdRef.current = sessionId
        saveSessionId(sessionId)
        setUserId(sessionUserId)
+       userIdRef.current = sessionUserId
        setError(null)
        addTrace('SESSION', 'IN', `Session established: ${sessionId}`, 'frontend/src/App.jsx:138')
      })
 
      newSocket.on('user-connected', (id) => {
        setUserId(id)
+       userIdRef.current = id
        console.log('Connected with ID:', id)
        addTrace('SESSION', 'IN', `User ID assigned: ${id}`, 'frontend/src/App.jsx:145')
      })
@@ -210,7 +213,7 @@ function App() {
     })
 
     newSocket.on('chat-message', ({ senderId, message, timestamp }) => {
-      setChatMessages(prev => [...prev, { senderId, message, timestamp, isOwn: senderId === userId }])
+      setChatMessages(prev => [...prev, { senderId, message, timestamp, isOwn: senderId === userIdRef.current }])
     })
 
     newSocket.on('disconnect', () => {
@@ -379,21 +382,43 @@ function App() {
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
 
     pc.onicecandidate = (event) => {
-      if (event.candidate && socket && activeCallUserId.current) {
+      if (event.candidate && socket && socket.connected && activeCallUserId.current) {
         socket.emit('ice-candidate', { targetUserId: activeCallUserId.current, candidate: event.candidate })
       }
     }
 
     pc.ontrack = (event) => {
-      setRemoteStream(event.streams[0])
+      if (event.streams && event.streams[0]) {
+        setRemoteStream(event.streams[0])
+      }
     }
 
     pc.oniceconnectionstatechange = () => {
       console.log('ICE connection state:', pc.iceConnectionState)
-      if (pc.iceConnectionState === 'connected') {
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
         setCallStatus('connected')
-        startCallTimer()
-      } else if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+        if (!callTimer.current) {
+          startCallTimer()
+        }
+      } else if (pc.iceConnectionState === 'failed') {
+        setError('Connection failed. Please try again.')
+        setCallStatus('disconnected')
+        cleanupCall()
+      } else if (pc.iceConnectionState === 'disconnected') {
+        // Give it a moment to reconnect before killing the call
+        setTimeout(() => {
+          if (pc.iceConnectionState === 'disconnected') {
+            setCallStatus('disconnected')
+            cleanupCall()
+          }
+        }, 3000)
+      }
+    }
+
+    pc.onconnectionstatechange = () => {
+      console.log('Connection state:', pc.connectionState)
+      if (pc.connectionState === 'failed') {
+        setError('Connection failed')
         setCallStatus('disconnected')
         cleanupCall()
       }
@@ -528,16 +553,25 @@ function App() {
   }
 
   const sendChatMessage = () => {
-    if (chatInput.trim() && socket && activeCallUserId.current) {
-      socket.emit('send-chat-message', { targetUserId: activeCallUserId.current, message: chatInput })
-      setChatMessages(prev => [...prev, { 
-        senderId: userId, 
-        message: chatInput, 
-        timestamp: new Date().toISOString(),
-        isOwn: true 
-      }])
-      setChatInput('')
+    if (!chatInput.trim()) return
+    if (!socket || !socket.connected) {
+      setError('Not connected to server')
+      return
     }
+    if (!activeCallUserId.current) {
+      setError('No active call')
+      return
+    }
+
+    const messageText = chatInput.trim()
+    socket.emit('send-chat-message', { targetUserId: activeCallUserId.current, message: messageText })
+    setChatMessages(prev => [...prev, { 
+      senderId: userIdRef.current, 
+      message: messageText, 
+      timestamp: new Date().toISOString(),
+      isOwn: true 
+    }])
+    setChatInput('')
   }
 
   const getStatusDisplay = () => {
