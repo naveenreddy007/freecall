@@ -215,6 +215,7 @@ function App() {
     newSocket.on('disconnect', () => {
       setError('Disconnected from server')
       setCallStatus('disconnected')
+      cleanupCall()
     })
 
     setSocket(newSocket)
