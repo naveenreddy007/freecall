@@ -130,6 +130,7 @@ function App() {
   const shareTimer = useRef(null)
   const sessionIdRef = useRef(readSessionId())
   const activeCallUserId = useRef(null)
+  const remoteAudioRef = useRef(null)
 
   useEffect(() => {
     const syncPage = () => setPage(getInitialPage())
@@ -234,6 +235,13 @@ function App() {
       }
     }
   }, [])
+
+  // Connect remote audio stream to audio element
+  useEffect(() => {
+    if (remoteAudioRef.current && remoteStream) {
+      remoteAudioRef.current.srcObject = remoteStream
+    }
+  }, [remoteStream])
 
   const startCallTimer = () => {
     setCallDuration(0)
@@ -424,7 +432,17 @@ function App() {
 
     } catch (err) {
       console.error('Error starting call:', err)
-      setError('Failed to access microphone. Please grant permission.')
+      let errorMsg = 'Failed to access microphone. Please grant permission.'
+      
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        errorMsg = 'Microphone permission denied. Please allow access in browser settings.'
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        errorMsg = 'No microphone found. Please connect a microphone and try again.'
+      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+        errorMsg = 'Microphone is already in use by another application.'
+      }
+      
+      setError(errorMsg)
       setCallStatus('disconnected')
       if (localStream) {
         localStream.getTracks().forEach(track => track.stop())
@@ -466,7 +484,17 @@ function App() {
 
     } catch (err) {
       console.error('Error accepting call:', err)
-      setError('Failed to accept call')
+      let errorMsg = 'Failed to accept call'
+      
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        errorMsg = 'Microphone permission denied. Please allow access in browser settings.'
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        errorMsg = 'No microphone found. Please connect a microphone.'
+      } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+        errorMsg = 'Microphone is already in use by another application.'
+      }
+      
+      setError(errorMsg)
       setCallStatus('disconnected')
     }
   }
@@ -851,7 +879,13 @@ function App() {
     </div>
   )
 
-  return page === 'how' ? renderHowItWorksPage() : renderHomePage()
+  return (
+    <>
+      {/* Hidden audio element for remote stream */}
+      <audio ref={remoteAudioRef} autoPlay playsInline />
+      {page === 'how' ? renderHowItWorksPage() : renderHomePage()}
+    </>
+  )
 }
 
 export default App
