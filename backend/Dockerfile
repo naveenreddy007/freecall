@@ -11,8 +11,8 @@ RUN npm ci --only=production
 # Copy application code
 COPY . .
 
-# Expose port
-EXPOSE 8080
+# Railway provides PORT env variable
+ENV PORT=8080
 
 # Start the server
 CMD ["node", "server.js"]
